@@ -283,6 +283,9 @@ public class SubsamplingScaleImageView extends View {
     // A global preference for bitmap format, available to decoder classes that respect it
     private static Bitmap.Config preferredBitmapConfig;
 
+    // Disable antialiasing for zoomin
+    private boolean pixelate = true;
+
     public SubsamplingScaleImageView(Context context, AttributeSet attr) {
         super(context, attr);
         density = getResources().getDisplayMetrics().density;
@@ -356,6 +359,15 @@ public class SubsamplingScaleImageView extends View {
      */
     public static void setPreferredBitmapConfig(Bitmap.Config preferredBitmapConfig) {
         SubsamplingScaleImageView.preferredBitmapConfig = preferredBitmapConfig;
+    }
+
+
+    public boolean isPixelate() {
+        return pixelate;
+    }
+
+    public void setPixelate(boolean pixelate) {
+        this.pixelate = pixelate;
     }
 
     /**
@@ -1226,9 +1238,9 @@ public class SubsamplingScaleImageView extends View {
     private void createPaints() {
         if (bitmapPaint == null) {
             bitmapPaint = new Paint();
-            bitmapPaint.setAntiAlias(true);
-            bitmapPaint.setFilterBitmap(true);
-            bitmapPaint.setDither(true);
+            bitmapPaint.setAntiAlias(!this.pixelate);
+            bitmapPaint.setFilterBitmap(!this.pixelate);
+            bitmapPaint.setDither(!this.pixelate);
         }
         if ((debugTextPaint == null || debugLinePaint == null) && debug) {
             debugTextPaint = new Paint();
