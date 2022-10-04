@@ -3,7 +3,6 @@ package com.davemorrissey.labs.subscaleview;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.res.TypedArray;
-import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -14,15 +13,10 @@ import android.graphics.Point;
 import android.graphics.PointF;
 import android.graphics.Rect;
 import android.graphics.RectF;
-import androidx.annotation.Nullable;
-import androidx.exifinterface.media.ExifInterface;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Handler;
 import android.os.Message;
-import android.provider.MediaStore;
-import androidx.annotation.AnyThread;
-import androidx.annotation.NonNull;
 import android.util.AttributeSet;
 import android.util.DisplayMetrics;
 import android.util.Log;
@@ -32,6 +26,11 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewParent;
 
+import androidx.annotation.AnyThread;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.exifinterface.media.ExifInterface;
+
 import com.davemorrissey.labs.subscaleview.R.styleable;
 import com.davemorrissey.labs.subscaleview.decoder.CompatDecoderFactory;
 import com.davemorrissey.labs.subscaleview.decoder.DecoderFactory;
@@ -40,6 +39,7 @@ import com.davemorrissey.labs.subscaleview.decoder.ImageRegionDecoder;
 import com.davemorrissey.labs.subscaleview.decoder.SkiaImageDecoder;
 import com.davemorrissey.labs.subscaleview.decoder.SkiaImageRegionDecoder;
 
+import java.io.InputStream;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -1561,7 +1561,6 @@ public class SubsamplingScaleImageView extends View {
         @Override
         protected int[] doInBackground(Void... params) {
             try {
-                String sourceUri = source.toString();
                 Context context = contextRef.get();
                 DecoderFactory<? extends ImageRegionDecoder> decoderFactory = decoderFactoryRef.get();
                 SubsamplingScaleImageView view = viewRef.get();
@@ -1571,7 +1570,7 @@ public class SubsamplingScaleImageView extends View {
                     Point dimensions = decoder.init(context, source);
                     int sWidth = dimensions.x;
                     int sHeight = dimensions.y;
-                    int exifOrientation = view.getExifOrientation(context, sourceUri);
+                    int exifOrientation = view.getExifOrientation(context, source);
                     if (view.sRegion != null) {
                         view.sRegion.left = Math.max(0, view.sRegion.left);
                         view.sRegion.top = Math.max(0, view.sRegion.top);
@@ -1746,14 +1745,13 @@ public class SubsamplingScaleImageView extends View {
         @Override
         protected Integer doInBackground(Void... params) {
             try {
-                String sourceUri = source.toString();
                 Context context = contextRef.get();
                 DecoderFactory<? extends ImageDecoder> decoderFactory = decoderFactoryRef.get();
                 SubsamplingScaleImageView view = viewRef.get();
                 if (context != null && decoderFactory != null && view != null) {
                     view.debug("BitmapLoadTask.doInBackground");
                     bitmap = decoderFactory.make().decode(context, source);
-                    return view.getExifOrientation(context, sourceUri);
+                    return view.getExifOrientation(context, source);
                 }
             } catch (Exception e) {
                 Log.e(TAG, "Failed to load bitmap", e);
@@ -1843,48 +1841,29 @@ public class SubsamplingScaleImageView extends View {
      * This will only work for external files, not assets, resources or other URIs.
      */
     @AnyThread
-    private int getExifOrientation(Context context, String sourceUri) {
-        int exifOrientation = ORIENTATION_0;
-        if (sourceUri.startsWith(ContentResolver.SCHEME_CONTENT)) {
-            Cursor cursor = null;
-            try {
-                String[] columns = { MediaStore.Images.Media.ORIENTATION };
-                cursor = context.getContentResolver().query(Uri.parse(sourceUri), columns, null, null, null);
-                if (cursor != null) {
-                    if (cursor.moveToFirst()) {
-                        int orientation = cursor.getInt(0);
-                        if (VALID_ORIENTATIONS.contains(orientation) && orientation != ORIENTATION_USE_EXIF) {
-                            exifOrientation = orientation;
-                        } else {
-                            Log.w(TAG, "Unsupported orientation: " + orientation);
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "Could not get orientation of image from media store");
-            } finally {
-                if (cursor != null) {
-                    cursor.close();
-                }
-            }
-        } else if (sourceUri.startsWith(ImageSource.FILE_SCHEME) && !sourceUri.startsWith(ImageSource.ASSET_SCHEME)) {
-            try {
-                ExifInterface exifInterface = new ExifInterface(sourceUri.substring(ImageSource.FILE_SCHEME.length() - 1));
-                int orientationAttr = exifInterface.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
-                if (orientationAttr == ExifInterface.ORIENTATION_NORMAL || orientationAttr == ExifInterface.ORIENTATION_UNDEFINED) {
-                    exifOrientation = ORIENTATION_0;
-                } else if (orientationAttr == ExifInterface.ORIENTATION_ROTATE_90) {
-                    exifOrientation = ORIENTATION_90;
-                } else if (orientationAttr == ExifInterface.ORIENTATION_ROTATE_180) {
-                    exifOrientation = ORIENTATION_180;
-                } else if (orientationAttr == ExifInterface.ORIENTATION_ROTATE_270) {
-                    exifOrientation = ORIENTATION_270;
+    private int getExifOrientation(Context context, Uri sourceUri) {
+        int exifOrientation = 0;
+        String sourceUristr = sourceUri.toString();
+
+        try {
+            InputStream in = context.getContentResolver().openInputStream(sourceUri);
+            ExifInterface exifInterface = new ExifInterface(in);
+            int orientationAttr = exifInterface.getAttributeInt("Orientation", 1);
+            if (orientationAttr != 1 && orientationAttr != 0) {
+                if (orientationAttr == 6) {
+                    exifOrientation = 90;
+                } else if (orientationAttr == 3) {
+                    exifOrientation = 180;
+                } else if (orientationAttr == 8) {
+                    exifOrientation = 270;
                 } else {
                     Log.w(TAG, "Unsupported EXIF orientation: " + orientationAttr);
                 }
-            } catch (Exception e) {
-                Log.w(TAG, "Could not get EXIF orientation of image");
+            } else {
+                exifOrientation = 0;
             }
+        } catch (Exception var8) {
+            Log.w(TAG, "Could not get EXIF orientation of image");
         }
         return exifOrientation;
     }
@@ -1993,6 +1972,24 @@ public class SubsamplingScaleImageView extends View {
      */
     @SuppressWarnings("SuspiciousNameCombination")
     private int sHeight() {
+        int rotation = getRequiredRotation();
+        if (rotation == 90 || rotation == 270) {
+            return sWidth;
+        } else {
+            return sHeight;
+        }
+    }
+
+    public int getOrientedSWidth() {
+        int rotation = getRequiredRotation();
+        if (rotation == 90 || rotation == 270) {
+            return sHeight;
+        } else {
+            return sWidth;
+        }
+    }
+
+    public int getOrientedSHeight() {
         int rotation = getRequiredRotation();
         if (rotation == 90 || rotation == 270) {
             return sWidth;
